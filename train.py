@@ -1,6 +1,6 @@
 """
 Training script for finetuning LLMs on RE-DocRED for relation extraction.
-Uses HuggingFace Transformers with Trainer API for model-agnostic training.
+Uses HuggingFace Transformers with Trainer API.
 """
 import json
 import logging
@@ -30,14 +30,14 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class RelationExtractionDataset:
-    """Custom dataset class for relation extraction."""
+    """dataset class for relation extraction."""
 
     def __init__(self, examples: List[Dict], tokenizer, max_length: int = 512):
         self.examples = examples
         self.tokenizer = tokenizer
         self.max_length = max_length
 
-        # Create label mapping
+        # label mapping
         unique_relations = list(set(ex['relation'] for ex in examples))
         self.label2id = {label: i for i, label in enumerate(sorted(unique_relations))}
         self.id2label = {i: label for label, i in self.label2id.items()}
@@ -210,7 +210,7 @@ def train_model(
 
 
 if __name__ == "__main__":
-    # Example usage
+    # E.g. usage
     model_config = ModelConfig(model_name="bert-base-uncased")
     training_config = TrainingConfig()
     data_config = DataConfig()

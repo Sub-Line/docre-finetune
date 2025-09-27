@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Main script for finetuning LLMs on RE-DocRED for knowledge graph generation.
-This script provides an interactive CLI for model selection and training.
+Main script for finetuning LLMs on RE-DocRED for KG generation.
+There is a CLI here just for model selection and training.
 """
 import argparse
 import os
@@ -12,20 +12,19 @@ from config import ModelConfig, TrainingConfig, DataConfig, HuggingFaceConfig
 
 
 def get_user_model_choice():
-    """Interactive prompt for user to select model."""
-    print("Welcome to the RE-DocRED LLM Finetuning Tool!")
-    print("\nPopular models for relation extraction:")
-    print("1. bert-base-uncased")
+    print("Welcome to our RE-DocRED LLM Finetuning Tool")
+    print("\nChoose a model for relation extraction:")
+    print("1. mistralai/Mistral-7B-v0.3")
     print("2. roberta-base")
     print("3. distilbert-base-uncased")
     print("4. microsoft/deberta-v3-base")
-    print("5. Custom model from HuggingFace Hub")
+    print("5. Custom model from HF Hub (note you may need permissions)")
 
     while True:
         choice = input("\nSelect a model (1-5) or enter custom model name: ").strip()
 
         if choice == "1":
-            return "bert-base-uncased"
+            return "mistralai/Mistral-7B-v0.3"
         elif choice == "2":
             return "roberta-base"
         elif choice == "3":
@@ -42,7 +41,6 @@ def get_user_model_choice():
 
 
 def setup_directories():
-    """Create necessary directories."""
     dirs = ["./data", "./outputs", "./logs"]
     for dir_path in dirs:
         Path(dir_path).mkdir(exist_ok=True)
@@ -68,7 +66,7 @@ def main():
     else:
         model_name = get_user_model_choice()
 
-    # Initialize configurations
+    # Initialize configs
     model_config = ModelConfig(model_name=model_name)
     training_config = TrainingConfig(output_dir=args.output_dir)
     data_config = DataConfig(data_dir=args.data_dir)
@@ -84,7 +82,7 @@ def main():
         from supplementary.data_cleaning.download_data import check_and_download_data
         check_and_download_data(data_config.data_dir)
 
-    # Start the full pipeline
+    # Start full pipeline
     print("\n" + "="*60)
     print("STARTING RE-DOCRED FINETUNING PIPELINE")
     print("="*60)
@@ -128,29 +126,26 @@ def main():
         test_data_path = Path(data_config.data_dir) / "test_processed.json"
         if test_data_path.exists():
             eval_results = evaluate_model(training_config.output_dir, str(test_data_path), data_config)
-            print(f"  ✓ Evaluation completed!")
+            print(f"    Evaluation completed!")
             print(f"    Accuracy: {eval_results['accuracy']:.4f}")
             print(f"    Macro F1: {eval_results['macro_avg_f1']:.4f}")
             print(f"    Weighted F1: {eval_results['weighted_avg_f1']:.4f}")
         else:
-            print("  ⚠ Test data not found, skipping evaluation...")
+            print("    Test data not found, skipping evaluation...")
             eval_results = None
 
-        # Step 4: Optional HuggingFace upload
+        # Step 4: HF upload (made optional)
         print("\n4. HuggingFace upload (optional)...")
         if eval_results:
             from upload_to_hf import main_upload_workflow
             main_upload_workflow(training_config.output_dir, model_config.model_name)
         else:
-            print("  ⚠ Skipping upload due to missing evaluation results")
+            print("    Skipping upload due to missing eval results")
 
-        print("\n" + "="*60)
-        print("PIPELINE COMPLETED SUCCESSFULLY! 🎉")
-        print("="*60)
+        print("\nPIPELINE COMPLETED SUCCESSFULLY!")
 
     except Exception as e:
-        print(f"\n❌ Pipeline failed with error: {e}")
-        print("Please check the logs for more details.")
+        print(f"\nFailed with error: {e}")
         raise e
 
 
