@@ -6,9 +6,11 @@ import json
 import logging
 import os
 import torch
+import shutil
 from pathlib import Path
 from typing import Dict, List, Any
 from dataclasses import dataclass
+from datetime import datetime
 
 from transformers import (
     AutoTokenizer,
@@ -100,6 +102,89 @@ def compute_metrics(eval_pred):
     }
 
 
+def create_backup_and_save(trainer, tokenizer, training_config, train_dataset, eval_results):
+    """Create backups and save model with timestamp for Colab safety."""
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    # Save to main output directory
+    logger.info(f"Saving model to {training_config.output_dir}")
+    trainer.save_model(training_config.output_dir)
+    tokenizer.save_pretrained(training_config.output_dir)
+
+    # Create timestamped backup
+    backup_dir = f"./backups/model_{timestamp}"
+    Path(backup_dir).mkdir(parents=True, exist_ok=True)
+
+    logger.info(f"Creating backup at {backup_dir}")
+
+    # Copy model files to backup
+    if Path(training_config.output_dir).exists():
+        shutil.copytree(training_config.output_dir, backup_dir, dirs_exist_ok=True)
+
+    # Save additional metadata
+    metadata = {
+        'timestamp': timestamp,
+        'model_name': training_config.output_dir,
+        'training_config': {
+            'batch_size': training_config.batch_size,
+            'learning_rate': training_config.learning_rate,
+            'num_epochs': training_config.num_epochs,
+        },
+        'dataset_info': {
+            'num_labels': len(train_dataset.label2id),
+            'label_mapping': train_dataset.label2id
+        },
+        'eval_results': eval_results
+    }
+
+    # Save metadata to both locations
+    for save_dir in [training_config.output_dir, backup_dir]:
+        with open(Path(save_dir) / "training_metadata.json", 'w') as f:
+            json.dump(metadata, f, indent=2)
+
+        with open(Path(save_dir) / "label_mapping.json", 'w') as f:
+            json.dump({
+                'label2id': train_dataset.label2id,
+                'id2label': train_dataset.id2label
+            }, f, indent=2)
+
+    # Save a summary for easy reference
+    summary = f"""
+🎯 Model Training Complete!
+========================
+
+📅 Timestamp: {timestamp}
+📁 Main Location: {training_config.output_dir}
+💾 Backup Location: {backup_dir}
+
+📊 Results:
+- Accuracy: {eval_results.get('eval_accuracy', 'N/A'):.4f}
+- F1 Score: {eval_results.get('eval_f1', 'N/A'):.4f}
+- Precision: {eval_results.get('eval_precision', 'N/A'):.4f}
+- Recall: {eval_results.get('eval_recall', 'N/A'):.4f}
+
+🏷️ Dataset Info:
+- Number of relation types: {len(train_dataset.label2id)}
+- Total training examples: {len(train_dataset.examples)}
+
+💡 To use this model:
+from transformers import AutoTokenizer, AutoModelForSequenceClassification
+tokenizer = AutoTokenizer.from_pretrained('{training_config.output_dir}')
+model = AutoModelForSequenceClassification.from_pretrained('{training_config.output_dir}')
+
+🔄 If Colab disconnects, your model is saved in both locations!
+"""
+
+    with open("./training_summary.txt", 'w') as f:
+        f.write(summary)
+
+    print(summary)
+    logger.info(f"Training summary saved to ./training_summary.txt")
+
+    return backup_dir
+
+
 def train_model(
     model_config: ModelConfig,
     training_config: TrainingConfig,
@@ -187,24 +272,17 @@ def train_model(
     logger.info("Starting training...")
     trainer.train()
 
-    # Save model and tokenizer
-    logger.info(f"Saving model to {training_config.output_dir}")
-    trainer.save_model()
-    tokenizer.save_pretrained(training_config.output_dir)
-
-    # Save label mapping
-    with open(Path(training_config.output_dir) / "label_mapping.json", 'w') as f:
-        json.dump({
-            'label2id': train_dataset.label2id,
-            'id2label': train_dataset.id2label
-        }, f, indent=2)
-
     # Final evaluation
     logger.info("Running final evaluation...")
     eval_results = trainer.evaluate()
 
+    # Save model with backup (Colab-safe)
+    backup_dir = create_backup_and_save(trainer, tokenizer, training_config, train_dataset, eval_results)
+
     logger.info("Training completed!")
     logger.info(f"Final evaluation results: {eval_results}")
+    logger.info(f"Model saved to: {training_config.output_dir}")
+    logger.info(f"Backup created at: {backup_dir}")
 
     return trainer, eval_results
 

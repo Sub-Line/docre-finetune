@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 
 from config import ModelConfig, TrainingConfig, DataConfig, HuggingFaceConfig
+from huggingface_hub import login, whoami
 
 
 def get_user_model_choice():
@@ -40,8 +41,58 @@ def get_user_model_choice():
             print("Invalid choice. Please try again.")
 
 
+def setup_hf_authentication():
+    """Setup HuggingFace authentication for gated models like Mistral."""
+    print("\n🔐 HuggingFace Authentication")
+    print("=" * 50)
+
+    # Check if already logged in
+    try:
+        user_info = whoami()
+        print(f"✅ Already logged in as: {user_info['name']}")
+        return True
+    except Exception:
+        pass
+
+    # Check for token in environment
+    hf_token = os.getenv('HF_TOKEN')
+    if hf_token:
+        try:
+            login(token=hf_token)
+            user_info = whoami()
+            print(f"✅ Logged in using HF_TOKEN as: {user_info['name']}")
+            return True
+        except Exception as e:
+            print(f"❌ Invalid HF_TOKEN: {e}")
+
+    # Interactive login
+    print("🔑 For gated models (like Mistral), you need to login to HuggingFace.")
+    print("💡 Get your token from: https://huggingface.co/settings/tokens")
+
+    while True:
+        choice = input("\nHow would you like to authenticate?\n1. Enter token now\n2. Skip (for public models only)\nChoice (1/2): ").strip()
+
+        if choice == "1":
+            token = input("Enter your HuggingFace token: ").strip()
+            if token:
+                try:
+                    login(token=token)
+                    user_info = whoami()
+                    print(f"✅ Successfully logged in as: {user_info['name']}")
+                    return True
+                except Exception as e:
+                    print(f"❌ Login failed: {e}")
+                    continue
+        elif choice == "2":
+            print("⚠️  Skipping authentication. Gated models will fail to load.")
+            return False
+        else:
+            print("Please enter 1 or 2.")
+
+
 def setup_directories():
-    dirs = ["./data", "./outputs", "./logs"]
+    """Create necessary directories and ensure they exist."""
+    dirs = ["./data", "./outputs", "./logs", "./backups"]
     for dir_path in dirs:
         Path(dir_path).mkdir(exist_ok=True)
         print(f"Created directory: {dir_path}")
@@ -58,6 +109,9 @@ def main():
 
     # Setup directories
     setup_directories()
+
+    # Setup HuggingFace authentication
+    setup_hf_authentication()
 
     # Get model choice
     if args.model:

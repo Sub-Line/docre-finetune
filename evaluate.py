@@ -10,6 +10,7 @@ from typing import Dict, List, Any, Tuple
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 from sklearn.metrics import classification_report, confusion_matrix
 import numpy as np
+from datetime import datetime
 
 from train import RelationExtractionDataset, load_processed_data
 from config import ModelConfig, DataConfig
@@ -195,6 +196,43 @@ if __name__ == "__main__":
     # Print detailed results
     print_detailed_results(results)
 
-    # Save results
+    # Save results to multiple locations for Colab safety
     output_path = Path(model_path) / "evaluation_results.json"
     save_evaluation_results(results, str(output_path))
+
+    # Also save to backups directory if it exists
+    backup_pattern = "./backups/model_*"
+    import glob
+    backup_dirs = glob.glob(backup_pattern)
+    if backup_dirs:
+        latest_backup = max(backup_dirs)  # Get most recent backup
+        backup_eval_path = Path(latest_backup) / "evaluation_results.json"
+        save_evaluation_results(results, str(backup_eval_path))
+        logger.info(f"Evaluation results also saved to backup: {backup_eval_path}")
+
+    # Save summary for easy access
+    summary_text = f"""
+📊 Model Evaluation Summary
+==========================
+
+📁 Model Path: {model_path}
+📅 Evaluation Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+
+🎯 Performance Metrics:
+- Accuracy: {results['accuracy']:.4f}
+- Macro F1: {results['macro_avg_f1']:.4f}
+- Weighted F1: {results['weighted_avg_f1']:.4f}
+
+📈 Dataset Info:
+- Test Examples: {results['num_test_examples']}
+- Relation Types: {len(results['label_names'])}
+
+💾 Results saved to:
+- {output_path}
+{"- " + str(backup_eval_path) if backup_dirs else ""}
+"""
+
+    with open("./evaluation_summary.txt", 'w') as f:
+        f.write(summary_text)
+
+    print(summary_text)
