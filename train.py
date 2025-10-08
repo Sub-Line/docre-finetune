@@ -102,27 +102,28 @@ def compute_metrics(eval_pred):
     }
 
 
-def create_backup_and_save(trainer, tokenizer, training_config, train_dataset, eval_results):
-    """Create backups and save model with timestamp for Colab safety."""
+def save_best_model_to_drive(trainer, tokenizer, training_config, train_dataset, eval_results):
+    """Save only the BEST model directly to Google Drive - no huge checkpoints!"""
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
-    # Save to main output directory
-    logger.info(f"Saving model to {training_config.output_dir}")
-    trainer.save_model(training_config.output_dir)
+    # Try to mount Google Drive
+    try:
+        from google.colab import drive
+        drive.mount('/content/drive', force_remount=False)
+        drive_available = True
+        drive_path = f"/content/drive/MyDrive/RE_DocRED_Models/best_model_{timestamp}"
+    except:
+        logger.warning("Google Drive not available, saving locally only")
+        drive_available = False
+        drive_path = None
+
+    # Save the BEST model only (not checkpoints)
+    logger.info(f"Saving BEST model to {training_config.output_dir}")
+    trainer.save_model(training_config.output_dir)  # This saves only the final best model
     tokenizer.save_pretrained(training_config.output_dir)
 
-    # Create timestamped backup
-    backup_dir = f"./backups/model_{timestamp}"
-    Path(backup_dir).mkdir(parents=True, exist_ok=True)
-
-    logger.info(f"Creating backup at {backup_dir}")
-
-    # Copy model files to backup
-    if Path(training_config.output_dir).exists():
-        shutil.copytree(training_config.output_dir, backup_dir, dirs_exist_ok=True)
-
-    # Save additional metadata
+    # Create metadata
     metadata = {
         'timestamp': timestamp,
         'model_name': training_config.output_dir,
@@ -138,25 +139,57 @@ def create_backup_and_save(trainer, tokenizer, training_config, train_dataset, e
         'eval_results': eval_results
     }
 
-    # Save metadata to both locations
-    for save_dir in [training_config.output_dir, backup_dir]:
-        with open(Path(save_dir) / "training_metadata.json", 'w') as f:
-            json.dump(metadata, f, indent=2)
+    # Save metadata locally
+    with open(Path(training_config.output_dir) / "training_metadata.json", 'w') as f:
+        json.dump(metadata, f, indent=2)
 
-        with open(Path(save_dir) / "label_mapping.json", 'w') as f:
-            json.dump({
-                'label2id': train_dataset.label2id,
-                'id2label': train_dataset.id2label
-            }, f, indent=2)
+    with open(Path(training_config.output_dir) / "label_mapping.json", 'w') as f:
+        json.dump({
+            'label2id': train_dataset.label2id,
+            'id2label': train_dataset.id2label
+        }, f, indent=2)
 
-    # Save a summary for easy reference
+    # Copy BEST model to Google Drive
+    if drive_available:
+        try:
+            Path(drive_path).mkdir(parents=True, exist_ok=True)
+            logger.info(f"Copying best model to Google Drive: {drive_path}")
+
+            # Copy only essential files (not huge checkpoints)
+            essential_files = [
+                "config.json",
+                "model.safetensors",
+                "tokenizer.json",
+                "tokenizer_config.json",
+                "training_metadata.json",
+                "label_mapping.json"
+            ]
+
+            for file_name in essential_files:
+                src_file = Path(training_config.output_dir) / file_name
+                if src_file.exists():
+                    shutil.copy(src_file, Path(drive_path) / file_name)
+                    logger.info(f"✅ Copied {file_name} to Drive")
+
+            # Copy any vocab files
+            for vocab_file in Path(training_config.output_dir).glob("vocab*"):
+                shutil.copy(vocab_file, Path(drive_path) / vocab_file.name)
+
+            drive_success = True
+        except Exception as e:
+            logger.error(f"Failed to copy to Google Drive: {e}")
+            drive_success = False
+    else:
+        drive_success = False
+
+    # Create summary
     summary = f"""
 🎯 Model Training Complete!
 ========================
 
 📅 Timestamp: {timestamp}
-📁 Main Location: {training_config.output_dir}
-💾 Backup Location: {backup_dir}
+📁 Local Location: {training_config.output_dir}
+{'💾 Google Drive: ' + drive_path if drive_success else '❌ Google Drive: Failed'}
 
 📊 Results:
 - Accuracy: {eval_results.get('eval_accuracy', 'N/A'):.4f}
@@ -170,10 +203,10 @@ def create_backup_and_save(trainer, tokenizer, training_config, train_dataset, e
 
 💡 To use this model:
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
-tokenizer = AutoTokenizer.from_pretrained('{training_config.output_dir}')
-model = AutoModelForSequenceClassification.from_pretrained('{training_config.output_dir}')
+tokenizer = AutoTokenizer.from_pretrained('{drive_path if drive_success else training_config.output_dir}')
+model = AutoModelForSequenceClassification.from_pretrained('{drive_path if drive_success else training_config.output_dir}')
 
-🔄 If Colab disconnects, your model is saved in both locations!
+✨ Only BEST model saved - no huge checkpoint files!
 """
 
     with open("./training_summary.txt", 'w') as f:
@@ -182,7 +215,7 @@ model = AutoModelForSequenceClassification.from_pretrained('{training_config.out
     print(summary)
     logger.info(f"Training summary saved to ./training_summary.txt")
 
-    return backup_dir
+    return drive_path if drive_success else training_config.output_dir
 
 
 def train_model(
@@ -237,7 +270,7 @@ def train_model(
     train_hf_dataset = Dataset.from_list([train_dataset[i] for i in range(len(train_dataset))])
     dev_hf_dataset = Dataset.from_list([dev_dataset[i] for i in range(len(dev_dataset))])
 
-    # Training arguments
+    # Training arguments - optimized for best model only
     training_args = TrainingArguments(
         output_dir=training_config.output_dir,
         num_train_epochs=training_config.num_epochs,
@@ -256,6 +289,10 @@ def train_model(
         greater_is_better=True,
         report_to=None,  # Disable wandb by default
         learning_rate=training_config.learning_rate,
+        save_total_limit=1,  # Keep only 1 checkpoint (saves space!)
+        dataloader_num_workers=2,  # Speed up data loading
+        fp16=torch.cuda.is_available(),  # Use mixed precision if GPU available
+        remove_unused_columns=False,  # Prevent column removal issues
     )
 
     # Create trainer
@@ -276,13 +313,12 @@ def train_model(
     logger.info("Running final evaluation...")
     eval_results = trainer.evaluate()
 
-    # Save model with backup (Colab-safe)
-    backup_dir = create_backup_and_save(trainer, tokenizer, training_config, train_dataset, eval_results)
+    # Save BEST model only (no huge checkpoints)
+    saved_model_path = save_best_model_to_drive(trainer, tokenizer, training_config, train_dataset, eval_results)
 
     logger.info("Training completed!")
     logger.info(f"Final evaluation results: {eval_results}")
-    logger.info(f"Model saved to: {training_config.output_dir}")
-    logger.info(f"Backup created at: {backup_dir}")
+    logger.info(f"Best model saved to: {saved_model_path}")
 
     return trainer, eval_results
 

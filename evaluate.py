@@ -36,36 +36,49 @@ def load_trained_model(model_path: str) -> Tuple[AutoModelForSequenceClassificat
     return model, tokenizer, label_mapping
 
 
-def predict_batch(model, tokenizer, examples: List[Dict], label_mapping: Dict, max_length: int = 512) -> List[str]:
-    """Make predictions on a batch of examples."""
+def predict_batch(model, tokenizer, examples: List[Dict], label_mapping: Dict, max_length: int = 512, batch_size: int = 32) -> List[str]:
+    """Make predictions on a batch of examples - MUCH FASTER!"""
     model.eval()
 
     predictions = []
     id2label = label_mapping['id2label']
 
-    with torch.no_grad():
-        for example in examples:
-            # Format input text
+    # Process in batches for speed
+    for i in range(0, len(examples), batch_size):
+        batch_examples = examples[i:i + batch_size]
+
+        # Prepare batch inputs
+        batch_texts = []
+        for example in batch_examples:
             text = example['text']
             head_entity = example['head_entity']
             tail_entity = example['tail_entity']
             input_text = f"{text} [SEP] {head_entity} [SEP] {tail_entity}"
+            batch_texts.append(input_text)
 
-            # Tokenize
-            encoding = tokenizer(
-                input_text,
-                truncation=True,
-                padding='max_length',
-                max_length=max_length,
-                return_tensors='pt'
-            )
+        # Tokenize batch
+        encoding = tokenizer(
+            batch_texts,
+            truncation=True,
+            padding=True,
+            max_length=max_length,
+            return_tensors='pt'
+        )
 
-            # Predict
+        # Move to GPU if available
+        if torch.cuda.is_available():
+            encoding = {k: v.cuda() for k, v in encoding.items()}
+            model = model.cuda()
+
+        # Predict batch
+        with torch.no_grad():
             outputs = model(**encoding)
-            predicted_label_id = torch.argmax(outputs.logits, dim=-1).item()
-            predicted_label = id2label[str(predicted_label_id)]
+            predicted_ids = torch.argmax(outputs.logits, dim=-1)
 
-            predictions.append(predicted_label)
+            # Convert to labels
+            for pred_id in predicted_ids:
+                predicted_label = id2label[str(pred_id.item())]
+                predictions.append(predicted_label)
 
     return predictions
 
