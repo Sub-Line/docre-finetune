@@ -242,19 +242,34 @@ def train_model(
     logger.info(f"Loading model: {model_config.model_name}")
     tokenizer = AutoTokenizer.from_pretrained(model_config.model_name)
 
-    # Fix padding token for Mistral and other models
+    # Fix padding token for Mistral and other models (with debugging)
+    logger.info(f"Before fix - pad_token: {tokenizer.pad_token}, pad_token_id: {tokenizer.pad_token_id}")
+
     if tokenizer.pad_token is None:
         if tokenizer.unk_token is not None:
             tokenizer.pad_token = tokenizer.unk_token
+            logger.info(f"Set pad_token to unk_token: {tokenizer.pad_token}")
         elif tokenizer.eos_token is not None:
             tokenizer.pad_token = tokenizer.eos_token
+            logger.info(f"Set pad_token to eos_token: {tokenizer.pad_token}")
         else:
             # Add a new pad token if none exists
             tokenizer.add_special_tokens({'pad_token': '[PAD]'})
+            logger.info("Added new [PAD] token")
 
-    # Ensure pad_token_id is set
+    # Ensure pad_token_id is set correctly
     if tokenizer.pad_token_id is None:
         tokenizer.pad_token_id = tokenizer.convert_tokens_to_ids(tokenizer.pad_token)
+        logger.info(f"Set pad_token_id to: {tokenizer.pad_token_id}")
+
+    # Final verification
+    logger.info(f"After fix - pad_token: {tokenizer.pad_token}, pad_token_id: {tokenizer.pad_token_id}")
+
+    # For Mistral specifically, force EOS as pad token
+    if 'mistral' in model_config.model_name.lower():
+        tokenizer.pad_token = tokenizer.eos_token
+        tokenizer.pad_token_id = tokenizer.eos_token_id
+        logger.info(f"Mistral detected - forced pad_token to EOS: {tokenizer.pad_token} (ID: {tokenizer.pad_token_id})")
 
     # Create datasets
     train_dataset = RelationExtractionDataset(train_examples, tokenizer, model_config.max_length)
@@ -280,12 +295,18 @@ def train_model(
     train_hf_dataset = Dataset.from_list([train_dataset[i] for i in range(len(train_dataset))])
     dev_hf_dataset = Dataset.from_list([dev_dataset[i] for i in range(len(dev_dataset))])
 
+    # Emergency fallback for persistent padding issues
+    effective_batch_size = training_config.batch_size
+    if tokenizer.pad_token_id is None or tokenizer.pad_token_id == tokenizer.unk_token_id == -1:
+        logger.warning("🚨 Padding token still problematic - forcing batch_size=1")
+        effective_batch_size = 1
+
     # Training arguments - optimized for best model only
     training_args = TrainingArguments(
         output_dir=training_config.output_dir,
         num_train_epochs=training_config.num_epochs,
-        per_device_train_batch_size=training_config.batch_size,
-        per_device_eval_batch_size=training_config.batch_size,
+        per_device_train_batch_size=effective_batch_size,
+        per_device_eval_batch_size=effective_batch_size,
         warmup_steps=training_config.warmup_steps,
         weight_decay=training_config.weight_decay,
         logging_dir=f"{training_config.output_dir}/logs",
@@ -303,7 +324,10 @@ def train_model(
         dataloader_num_workers=2,  # Speed up data loading
         fp16=torch.cuda.is_available(),  # Use mixed precision if GPU available
         remove_unused_columns=False,  # Prevent column removal issues
+        dataloader_drop_last=False,  # Don't drop incomplete batches
     )
+
+    logger.info(f"Using batch sizes: train={effective_batch_size}, eval={effective_batch_size}")
 
     # Create trainer
     trainer = Trainer(
