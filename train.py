@@ -24,6 +24,17 @@ from transformers import (
     EarlyStoppingCallback,
 )
 
+from datasets import Dataset
+from sklearn.metrics import precision_recall_fscore_support, accuracy_score
+import numpy as np
+
+from config import ModelConfig, TrainingConfig, DataConfig
+import gc
+
+# Setup logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 # Try to import QLoRA dependencies, fall back if not available
 try:
     from transformers import BitsAndBytesConfig
@@ -39,16 +50,6 @@ except ImportError as e:
     QLORA_AVAILABLE = False
     logger.warning(f"⚠️ QLoRA not available: {e}")
     logger.warning("Will use standard fine-tuning instead")
-from datasets import Dataset
-from sklearn.metrics import precision_recall_fscore_support, accuracy_score
-import numpy as np
-
-from config import ModelConfig, TrainingConfig, DataConfig
-import gc
-
-# Setup logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
 
 
 @dataclass
