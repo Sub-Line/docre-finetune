@@ -12,6 +12,9 @@ from typing import Dict, List, Any
 from dataclasses import dataclass
 from datetime import datetime
 
+# Fix tokenizer parallelism warning
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
 from transformers import (
     AutoTokenizer,
     AutoModelForSequenceClassification,
@@ -285,11 +288,21 @@ def train_model(
         model_config.model_name,
         num_labels=num_labels,
         id2label=train_dataset.id2label,
-        label2id=train_dataset.label2id
+        label2id=train_dataset.label2id,
+        pad_token_id=tokenizer.pad_token_id,  # Critical: Set pad_token_id in model config!
     )
 
     # Resize token embeddings if we added new tokens
     model.resize_token_embeddings(len(tokenizer))
+
+    # CRITICAL FIX: Explicitly set pad_token_id in model config
+    model.config.pad_token_id = tokenizer.pad_token_id
+    logger.info(f"✅ Set model.config.pad_token_id to: {model.config.pad_token_id}")
+
+    # For Mistral, also ensure the model knows about EOS token padding
+    if 'mistral' in model_config.model_name.lower():
+        model.config.pad_token_id = tokenizer.eos_token_id
+        logger.info(f"🎯 Mistral: Set model.config.pad_token_id to EOS: {model.config.pad_token_id}")
 
     # Convert to HuggingFace datasets
     train_hf_dataset = Dataset.from_list([train_dataset[i] for i in range(len(train_dataset))])
