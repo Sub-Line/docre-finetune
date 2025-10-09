@@ -126,6 +126,14 @@ def main():
     data_config = DataConfig(data_dir=args.data_dir)
     hf_config = HuggingFaceConfig()
 
+    # Optimize settings for large models like Mistral
+    if 'mistral' in model_name.lower() or '7b' in model_name.lower():
+        print("🔧 Detected large model - optimizing settings...")
+        training_config.batch_size = min(training_config.batch_size, 4)
+        training_config.eval_steps = 1000  # Less frequent evaluation
+        print(f"   Reduced batch size to: {training_config.batch_size}")
+        print(f"   Increased eval steps to: {training_config.eval_steps}")
+
     print(f"\nConfiguration:")
     print(f"Model: {model_config.model_name}")
     print(f"Data directory: {data_config.data_dir}")

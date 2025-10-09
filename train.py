@@ -242,9 +242,19 @@ def train_model(
     logger.info(f"Loading model: {model_config.model_name}")
     tokenizer = AutoTokenizer.from_pretrained(model_config.model_name)
 
-    # Add special tokens if needed
+    # Fix padding token for Mistral and other models
     if tokenizer.pad_token is None:
-        tokenizer.pad_token = tokenizer.eos_token
+        if tokenizer.unk_token is not None:
+            tokenizer.pad_token = tokenizer.unk_token
+        elif tokenizer.eos_token is not None:
+            tokenizer.pad_token = tokenizer.eos_token
+        else:
+            # Add a new pad token if none exists
+            tokenizer.add_special_tokens({'pad_token': '[PAD]'})
+
+    # Ensure pad_token_id is set
+    if tokenizer.pad_token_id is None:
+        tokenizer.pad_token_id = tokenizer.convert_tokens_to_ids(tokenizer.pad_token)
 
     # Create datasets
     train_dataset = RelationExtractionDataset(train_examples, tokenizer, model_config.max_length)

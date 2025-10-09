@@ -19,6 +19,12 @@ class TrainingConfig:
     batch_size: int = 8
     learning_rate: float = 2e-5
     num_epochs: int = 3
+
+    def __post_init__(self):
+        # Auto-adjust batch size for large models to prevent OOM
+        if hasattr(self, '_model_name'):
+            if 'mistral' in self._model_name.lower() or '7b' in self._model_name.lower():
+                self.batch_size = min(self.batch_size, 4)  # Reduce for large models
     warmup_steps: int = 500
     weight_decay: float = 0.01
     save_steps: int = 1000
