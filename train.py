@@ -22,14 +22,23 @@ from transformers import (
     TrainingArguments,
     Trainer,
     EarlyStoppingCallback,
-    BitsAndBytesConfig
 )
-from peft import (
-    LoraConfig,
-    get_peft_model,
-    TaskType,
-    prepare_model_for_kbit_training
-)
+
+# Try to import QLoRA dependencies, fall back if not available
+try:
+    from transformers import BitsAndBytesConfig
+    from peft import (
+        LoraConfig,
+        get_peft_model,
+        TaskType,
+        prepare_model_for_kbit_training
+    )
+    QLORA_AVAILABLE = True
+    logger.info("✅ QLoRA dependencies available")
+except ImportError as e:
+    QLORA_AVAILABLE = False
+    logger.warning(f"⚠️ QLoRA not available: {e}")
+    logger.warning("Will use standard fine-tuning instead")
 from datasets import Dataset
 from sklearn.metrics import precision_recall_fscore_support, accuracy_score
 import numpy as np
@@ -311,7 +320,7 @@ def train_model(
     num_labels = len(train_dataset.label2id)
 
     # QLoRA Configuration for massive memory savings
-    use_qlora = 'mistral' in model_config.model_name.lower() or '7b' in model_config.model_name.lower()
+    use_qlora = QLORA_AVAILABLE and ('mistral' in model_config.model_name.lower() or '7b' in model_config.model_name.lower())
 
     if use_qlora:
         logger.info("🚀 Using QLoRA for extreme memory efficiency!")
