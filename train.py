@@ -12,21 +12,30 @@ from typing import Dict, List, Any
 from dataclasses import dataclass
 from datetime import datetime
 
-# Fix tokenizer parallelism warning
+# Fix tokenizer parallelism warning and memory optimization
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 
 from transformers import (
     AutoTokenizer,
     AutoModelForSequenceClassification,
     TrainingArguments,
     Trainer,
-    EarlyStoppingCallback
+    EarlyStoppingCallback,
+    BitsAndBytesConfig
+)
+from peft import (
+    LoraConfig,
+    get_peft_model,
+    TaskType,
+    prepare_model_for_kbit_training
 )
 from datasets import Dataset
 from sklearn.metrics import precision_recall_fscore_support, accuracy_score
 import numpy as np
 
 from config import ModelConfig, TrainingConfig, DataConfig
+import gc
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -105,7 +114,7 @@ def compute_metrics(eval_pred):
     }
 
 
-def save_best_model_to_drive(trainer, tokenizer, training_config, train_dataset, eval_results):
+def save_best_model_to_drive(trainer, tokenizer, training_config, train_dataset, eval_results, use_qlora=False):
     """Save only the BEST model directly to Google Drive - no huge checkpoints!"""
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -123,7 +132,23 @@ def save_best_model_to_drive(trainer, tokenizer, training_config, train_dataset,
 
     # Save the BEST model only (not checkpoints)
     logger.info(f"Saving BEST model to {training_config.output_dir}")
-    trainer.save_model(training_config.output_dir)  # This saves only the final best model
+
+    if use_qlora:
+        # For QLoRA, save only the adapter weights (much smaller!)
+        logger.info("💾 Saving QLoRA adapter weights (very small!)...")
+        trainer.model.save_pretrained(training_config.output_dir)
+
+        # Also save base model info for loading later
+        with open(Path(training_config.output_dir) / "adapter_config.json", 'w') as f:
+            json.dump({
+                "base_model_name": trainer.model.peft_config['default'].base_model_name_or_path,
+                "model_type": "qlora_adapter"
+            }, f, indent=2)
+        logger.info("✅ QLoRA adapter saved - only ~20MB instead of 13GB!")
+    else:
+        # Standard model saving
+        trainer.save_model(training_config.output_dir)
+
     tokenizer.save_pretrained(training_config.output_dir)
 
     # Create metadata
@@ -282,15 +307,70 @@ def train_model(
     dev_dataset.label2id = train_dataset.label2id
     dev_dataset.id2label = train_dataset.id2label
 
-    # Load model with correct number of labels
+    # Load model with QLoRA optimizations
     num_labels = len(train_dataset.label2id)
+
+    # QLoRA Configuration for massive memory savings
+    use_qlora = 'mistral' in model_config.model_name.lower() or '7b' in model_config.model_name.lower()
+
+    if use_qlora:
+        logger.info("🚀 Using QLoRA for extreme memory efficiency!")
+
+        # 4-bit quantization config
+        bnb_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_use_double_quant=True,
+            bnb_4bit_quant_type="nf4",
+            bnb_4bit_compute_dtype=torch.bfloat16
+        )
+
+        model_kwargs = {
+            'num_labels': num_labels,
+            'quantization_config': bnb_config,
+            'device_map': 'auto',
+            'pad_token_id': tokenizer.pad_token_id,
+        }
+    else:
+        logger.info("🔧 Loading smaller model with standard optimizations...")
+        model_kwargs = {
+            'num_labels': num_labels,
+            'id2label': train_dataset.id2label,
+            'label2id': train_dataset.label2id,
+            'pad_token_id': tokenizer.pad_token_id,
+            'torch_dtype': torch.float16,
+            'device_map': 'auto',
+        }
+
     model = AutoModelForSequenceClassification.from_pretrained(
         model_config.model_name,
-        num_labels=num_labels,
-        id2label=train_dataset.id2label,
-        label2id=train_dataset.label2id,
-        pad_token_id=tokenizer.pad_token_id,  # Critical: Set pad_token_id in model config!
+        **model_kwargs
     )
+
+    # Setup LoRA for large models
+    if use_qlora:
+        logger.info("⚡ Setting up LoRA adapters...")
+
+        # Prepare model for k-bit training
+        model = prepare_model_for_kbit_training(model)
+
+        # LoRA configuration
+        lora_config = LoraConfig(
+            task_type=TaskType.SEQ_CLS,
+            inference_mode=False,
+            r=16,  # Rank - controls adapter size
+            lora_alpha=32,  # LoRA scaling parameter
+            lora_dropout=0.1,
+            target_modules=[
+                "q_proj", "v_proj", "k_proj", "o_proj",
+                "gate_proj", "up_proj", "down_proj",
+            ],  # Mistral attention and MLP modules
+        )
+
+        # Apply LoRA
+        model = get_peft_model(model, lora_config)
+        model.print_trainable_parameters()
+
+        logger.info("✅ QLoRA setup complete - using ~4x less memory!")
 
     # Resize token embeddings if we added new tokens
     model.resize_token_embeddings(len(tokenizer))
@@ -308,8 +388,17 @@ def train_model(
     train_hf_dataset = Dataset.from_list([train_dataset[i] for i in range(len(train_dataset))])
     dev_hf_dataset = Dataset.from_list([dev_dataset[i] for i in range(len(dev_dataset))])
 
-    # Emergency fallback for persistent padding issues
+    # Memory management and batch size optimization
     effective_batch_size = training_config.batch_size
+
+    # With QLoRA we can use larger batch sizes!
+    if use_qlora:
+        effective_batch_size = 4  # QLoRA allows larger batches
+        logger.info("🚀 QLoRA enabled - using batch_size=4")
+    elif 'mistral' in model_config.model_name.lower() or '7b' in model_config.model_name.lower():
+        effective_batch_size = 1
+        logger.info("🔥 Large model detected - forcing batch_size=1 for memory")
+
     if tokenizer.pad_token_id is None or tokenizer.pad_token_id == tokenizer.unk_token_id == -1:
         logger.warning("🚨 Padding token still problematic - forcing batch_size=1")
         effective_batch_size = 1
@@ -334,10 +423,13 @@ def train_model(
         report_to=None,  # Disable wandb by default
         learning_rate=training_config.learning_rate,
         save_total_limit=1,  # Keep only 1 checkpoint (saves space!)
-        dataloader_num_workers=2,  # Speed up data loading
-        fp16=torch.cuda.is_available(),  # Use mixed precision if GPU available
+        dataloader_num_workers=0,  # Disable multiprocessing for memory
+        bf16=torch.cuda.is_available(),  # Use bfloat16 for QLoRA compatibility
         remove_unused_columns=False,  # Prevent column removal issues
         dataloader_drop_last=False,  # Don't drop incomplete batches
+        gradient_accumulation_steps=4 if use_qlora else 8,  # Less accumulation with QLoRA
+        gradient_checkpointing=True,  # Trade compute for memory
+        optim="paged_adamw_32bit" if use_qlora else "adamw_torch_fused",  # QLoRA-compatible optimizer
     )
 
     logger.info(f"Using batch sizes: train={effective_batch_size}, eval={effective_batch_size}")
@@ -352,6 +444,12 @@ def train_model(
         callbacks=[EarlyStoppingCallback(early_stopping_patience=3)]
     )
 
+    # Clear memory before training
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        gc.collect()
+        logger.info(f"🧹 Cleared CUDA cache. Available memory: {torch.cuda.get_device_properties(0).total_memory - torch.cuda.memory_allocated():.2e} bytes")
+
     # Train model
     logger.info("Starting training...")
     trainer.train()
@@ -361,7 +459,7 @@ def train_model(
     eval_results = trainer.evaluate()
 
     # Save BEST model only (no huge checkpoints)
-    saved_model_path = save_best_model_to_drive(trainer, tokenizer, training_config, train_dataset, eval_results)
+    saved_model_path = save_best_model_to_drive(trainer, tokenizer, training_config, train_dataset, eval_results, use_qlora)
 
     logger.info("Training completed!")
     logger.info(f"Final evaluation results: {eval_results}")

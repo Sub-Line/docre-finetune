@@ -128,11 +128,18 @@ def main():
 
     # Optimize settings for large models like Mistral
     if 'mistral' in model_name.lower() or '7b' in model_name.lower():
-        print("🔧 Detected large model - optimizing settings...")
-        training_config.batch_size = min(training_config.batch_size, 4)
-        training_config.eval_steps = 1000  # Less frequent evaluation
-        print(f"   Reduced batch size to: {training_config.batch_size}")
-        print(f"   Increased eval steps to: {training_config.eval_steps}")
+        print("🚀 Detected large model - using QLoRA for efficiency!")
+        training_config.batch_size = 4   # QLoRA allows larger batches
+        training_config.eval_steps = 1000  # More reasonable evaluation frequency
+        training_config.save_steps = 1000  # More reasonable saving
+        training_config.logging_steps = 50   # Frequent logging to track progress
+        data_config.max_examples = 20000  # Can handle more data with QLoRA
+        print(f"   🎯 QLoRA Optimizations:")
+        print(f"   - 4-bit quantization: ~75% memory reduction")
+        print(f"   - LoRA adapters: Only train ~1% of parameters")
+        print(f"   - Batch size: {training_config.batch_size}")
+        print(f"   - Training examples: {data_config.max_examples}")
+        print(f"   - Model size on disk: ~20MB (adapters only!)")
 
     print(f"\nConfiguration:")
     print(f"Model: {model_config.model_name}")
