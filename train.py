@@ -309,13 +309,26 @@ def train_model(
         tokenizer.pad_token_id = tokenizer.eos_token_id
         logger.info(f"Mistral detected - forced pad_token to EOS: {tokenizer.pad_token} (ID: {tokenizer.pad_token_id})")
 
-    # Create datasets
+    # Create unified label mapping from ALL examples (train + dev)
+    logger.info("Creating unified label mapping from train and dev data...")
+    all_examples = train_examples + dev_examples
+    all_relations = list(set(ex['relation'] for ex in all_examples))
+    unified_label2id = {label: i for i, label in enumerate(sorted(all_relations))}
+    unified_id2label = {i: label for label, i in unified_label2id.items()}
+
+    logger.info(f"Found {len(all_relations)} unique relations across train and dev sets")
+
+    # Create datasets with unified mapping
     train_dataset = RelationExtractionDataset(train_examples, tokenizer, model_config.max_length)
     dev_dataset = RelationExtractionDataset(dev_examples, tokenizer, model_config.max_length)
 
-    # Ensure both datasets use the same label mapping
-    dev_dataset.label2id = train_dataset.label2id
-    dev_dataset.id2label = train_dataset.id2label
+    # Override with unified mapping
+    train_dataset.label2id = unified_label2id
+    train_dataset.id2label = unified_id2label
+    dev_dataset.label2id = unified_label2id
+    dev_dataset.id2label = unified_id2label
+
+    logger.info("✅ Both datasets now use the same unified label mapping")
 
     # Load model with QLoRA optimizations
     num_labels = len(train_dataset.label2id)
