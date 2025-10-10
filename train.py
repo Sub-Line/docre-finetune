@@ -451,8 +451,10 @@ def train_model(
         remove_unused_columns=False,  # Prevent column removal issues
         dataloader_drop_last=False,  # Don't drop incomplete batches
         gradient_accumulation_steps=4 if use_qlora else 8,  # Less accumulation with QLoRA
-        gradient_checkpointing=True,  # Trade compute for memory
-        optim="paged_adamw_32bit" if use_qlora else "adamw_torch_fused",  # QLoRA-compatible optimizer
+        gradient_checkpointing=False,  # Disable to avoid backward graph issues
+        optim="paged_adamw_32bit" if use_qlora else "adamw_torch",  # Use stable optimizer
+        dataloader_persistent_workers=False,  # Avoid worker issues
+        include_inputs_for_metrics=False,  # Reduce memory overhead
     )
 
     logger.info(f"Using batch sizes: train={effective_batch_size}, eval={effective_batch_size}")
@@ -473,9 +475,32 @@ def train_model(
         gc.collect()
         logger.info(f"🧹 Cleared CUDA cache. Available memory: {torch.cuda.get_device_properties(0).total_memory - torch.cuda.memory_allocated():.2e} bytes")
 
-    # Train model
+    # Train model with error handling
     logger.info("Starting training...")
-    trainer.train()
+    try:
+        trainer.train()
+    except RuntimeError as e:
+        if "backward through the graph" in str(e):
+            logger.error("❌ Gradient checkpointing conflict detected. Restarting with safer settings...")
+            # Force more conservative settings
+            training_args.gradient_checkpointing = False
+            training_args.dataloader_num_workers = 0
+            training_args.per_device_train_batch_size = 1
+            training_args.gradient_accumulation_steps = 16
+
+            # Recreate trainer with safer settings
+            trainer = Trainer(
+                model=model,
+                args=training_args,
+                train_dataset=train_hf_dataset,
+                eval_dataset=dev_hf_dataset,
+                compute_metrics=compute_metrics,
+                callbacks=[EarlyStoppingCallback(early_stopping_patience=3)]
+            )
+            logger.info("🔄 Retrying with safer training settings...")
+            trainer.train()
+        else:
+            raise e
 
     # Final evaluation
     logger.info("Running final evaluation...")
