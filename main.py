@@ -15,24 +15,33 @@ from huggingface_hub import login, whoami
 def get_user_model_choice():
     print("Welcome to our RE-DocRED LLM Finetuning Tool")
     print("\nChoose a model for relation extraction:")
-    print("1. mistralai/Mistral-7B-v0.3")
-    print("2. roberta-base")
-    print("3. distilbert-base-uncased")
-    print("4. microsoft/deberta-v3-base")
-    print("5. Custom model from HF Hub (note you may need permissions)")
+    print("1. mistralai/Mistral-7B-v0.3 (Large, requires good GPU)")
+    print("2. microsoft/deberta-v3-large (434M - Excellent for RE)")
+    print("3. roberta-large (355M - Great for RE)")
+    print("4. microsoft/DialoGPT-medium (345M - Efficient)")
+    print("5. roberta-base (125M - Fast baseline)")
+    print("6. distilbert-base-uncased (66M - Very fast)")
+    print("7. microsoft/deberta-v3-base (184M - Good balance)")
+    print("8. Custom model from HF Hub (note you may need permissions)")
 
     while True:
-        choice = input("\nSelect a model (1-5) or enter custom model name: ").strip()
+        choice = input("\nSelect a model (1-8) or enter custom model name: ").strip()
 
         if choice == "1":
             return "mistralai/Mistral-7B-v0.3"
         elif choice == "2":
-            return "roberta-base"
+            return "microsoft/deberta-v3-large"
         elif choice == "3":
-            return "distilbert-base-uncased"
+            return "roberta-large"
         elif choice == "4":
-            return "microsoft/deberta-v3-base"
+            return "microsoft/DialoGPT-medium"
         elif choice == "5":
+            return "roberta-base"
+        elif choice == "6":
+            return "distilbert-base-uncased"
+        elif choice == "7":
+            return "microsoft/deberta-v3-base"
+        elif choice == "8":
             model_name = input("Enter HuggingFace model name: ").strip()
             return model_name
         elif "/" in choice:  # Assume it's a HF model path
