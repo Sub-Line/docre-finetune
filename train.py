@@ -339,19 +339,35 @@ def train_model(
     if use_qlora:
         logger.info("🚀 Using QLoRA for extreme memory efficiency!")
 
-        # 4-bit quantization config
+        # Ultra-aggressive 4-bit quantization config for Mistral
         bnb_config = BitsAndBytesConfig(
             load_in_4bit=True,
             bnb_4bit_use_double_quant=True,
             bnb_4bit_quant_type="nf4",
-            bnb_4bit_compute_dtype=torch.bfloat16
+            bnb_4bit_compute_dtype=torch.bfloat16,
+            llm_int8_enable_fp32_cpu_offload=True,  # CPU offload for extreme memory savings
         )
+
+        # Ultra-aggressive device mapping for Mistral
+        if 'mistral' in model_config.model_name.lower():
+            device_map = {
+                "model.embed_tokens": "cpu",
+                "model.layers.0": "cpu",
+                "model.layers.1": "cpu",
+                "model.layers.2": "cpu",
+                "lm_head": "cpu",
+                "model.norm": "cpu",
+            }
+            logger.info("🔄 Using CPU offload for embeddings and some layers")
+        else:
+            device_map = 'auto'
 
         model_kwargs = {
             'num_labels': num_labels,
             'quantization_config': bnb_config,
-            'device_map': 'auto',
+            'device_map': device_map,
             'pad_token_id': tokenizer.pad_token_id,
+            'low_cpu_mem_usage': True,  # Reduce CPU memory during loading
         }
     else:
         logger.info("🔧 Loading smaller model with standard optimizations...")
@@ -376,18 +392,31 @@ def train_model(
         # Prepare model for k-bit training
         model = prepare_model_for_kbit_training(model)
 
-        # LoRA configuration
-        lora_config = LoraConfig(
-            task_type=TaskType.SEQ_CLS,
-            inference_mode=False,
-            r=16,  # Rank - controls adapter size
-            lora_alpha=32,  # LoRA scaling parameter
-            lora_dropout=0.1,
-            target_modules=[
-                "q_proj", "v_proj", "k_proj", "o_proj",
-                "gate_proj", "up_proj", "down_proj",
-            ],  # Mistral attention and MLP modules
-        )
+        # Ultra-efficient LoRA configuration for Mistral 7B
+        if 'mistral' in model_config.model_name.lower():
+            lora_config = LoraConfig(
+                task_type=TaskType.SEQ_CLS,
+                inference_mode=False,
+                r=8,  # Smaller rank for less memory (was 16)
+                lora_alpha=16,  # Proportional scaling (was 32)
+                lora_dropout=0.05,  # Less dropout for stability
+                target_modules=[
+                    "q_proj", "v_proj",  # Only attention, skip MLP for memory
+                ],  # Minimal target modules for Mistral
+            )
+            logger.info("🎯 Ultra-efficient LoRA: r=8, attention-only, minimal parameters")
+        else:
+            lora_config = LoraConfig(
+                task_type=TaskType.SEQ_CLS,
+                inference_mode=False,
+                r=16,  # Standard rank for other models
+                lora_alpha=32,  # Standard scaling
+                lora_dropout=0.1,
+                target_modules=[
+                    "q_proj", "v_proj", "k_proj", "o_proj",
+                    "gate_proj", "up_proj", "down_proj",
+                ],  # Full modules for other models
+            )
 
         # Apply LoRA
         model = get_peft_model(model, lora_config)
@@ -414,10 +443,13 @@ def train_model(
     # Memory management and batch size optimization
     effective_batch_size = training_config.batch_size
 
-    # With QLoRA we can use larger batch sizes!
-    if use_qlora:
-        effective_batch_size = 4  # QLoRA allows larger batches
-        logger.info("🚀 QLoRA enabled - using batch_size=4")
+    # Ultra-conservative memory settings for Mistral 7B
+    if use_qlora and ('mistral' in model_config.model_name.lower() or '7b' in model_config.model_name.lower()):
+        effective_batch_size = 1  # Ultra conservative for Mistral
+        logger.info("⚡ Mistral 7B QLoRA - ULTRA memory conservative: batch_size=1")
+    elif use_qlora:
+        effective_batch_size = 2  # Smaller than before for stability
+        logger.info("🚀 QLoRA enabled - using batch_size=2")
     elif 'mistral' in model_config.model_name.lower() or '7b' in model_config.model_name.lower():
         effective_batch_size = 1
         logger.info("🔥 Large model detected - forcing batch_size=1 for memory")
@@ -450,11 +482,13 @@ def train_model(
         bf16=torch.cuda.is_available(),  # Use bfloat16 for QLoRA compatibility
         remove_unused_columns=False,  # Prevent column removal issues
         dataloader_drop_last=False,  # Don't drop incomplete batches
-        gradient_accumulation_steps=4 if use_qlora else 8,  # Less accumulation with QLoRA
+        gradient_accumulation_steps=32 if (use_qlora and 'mistral' in model_config.model_name.lower()) else (4 if use_qlora else 8),  # High accumulation for Mistral
         gradient_checkpointing=False,  # Disable to avoid backward graph issues
-        optim="paged_adamw_32bit" if use_qlora else "adamw_torch",  # Use stable optimizer
+        optim="paged_adamw_8bit" if (use_qlora and 'mistral' in model_config.model_name.lower()) else ("paged_adamw_32bit" if use_qlora else "adamw_torch"),  # 8-bit optimizer for Mistral
         dataloader_persistent_workers=False,  # Avoid worker issues
         include_inputs_for_metrics=False,  # Reduce memory overhead
+        max_grad_norm=0.3 if 'mistral' in model_config.model_name.lower() else 1.0,  # Lower gradient clipping for stability
+        adam_epsilon=1e-6 if 'mistral' in model_config.model_name.lower() else 1e-8,  # More stable for 4-bit
     )
 
     logger.info(f"Using batch sizes: train={effective_batch_size}, eval={effective_batch_size}")

@@ -167,18 +167,20 @@ def main():
 
     # Optimize settings for large models like Mistral
     if 'mistral' in model_name.lower() or '7b' in model_name.lower():
-        print("🚀 Detected large model - using QLoRA for efficiency!")
-        training_config.batch_size = 4   # QLoRA allows larger batches
+        print("🚀 Detected large model - using AGGRESSIVE QLoRA for maximum efficiency!")
+        training_config.batch_size = 1   # Ultra conservative for memory
         training_config.eval_steps = 500  # More reasonable evaluation frequency
-        training_config.save_steps = 1000  # More reasonable saving
-        training_config.logging_steps = 50   # Frequent logging to track progress
-        data_config.max_examples = 20000  # Can handle more data with QLoRA
-        print(f"   🎯 QLoRA Optimizations:")
+        training_config.save_steps = 2000  # Less frequent saving to reduce I/O
+        training_config.logging_steps = 25   # Frequent logging to track progress
+        data_config.max_examples = 15000  # Reduced dataset size for stability
+        print(f"   🎯 AGGRESSIVE QLoRA Optimizations:")
         print(f"   - 4-bit quantization: ~75% memory reduction")
-        print(f"   - LoRA adapters: Only train ~1% of parameters")
-        print(f"   - Batch size: {training_config.batch_size}")
-        print(f"   - Training examples: {data_config.max_examples}")
-        print(f"   - Model size on disk: ~20MB (adapters only!)")
+        print(f"   - LoRA adapters: Only train ~0.5% of parameters")
+        print(f"   - Ultra-small batch size: {training_config.batch_size}")
+        print(f"   - Reduced training examples: {data_config.max_examples}")
+        print(f"   - High gradient accumulation for effective batch size")
+        print(f"   - Model size on disk: ~15MB (adapters only!)")
+        print(f"   ⚡ Memory optimizations: CPU offload + mixed precision")
 
     print(f"\nConfiguration:")
     print(f"Model: {model_config.model_name}")
