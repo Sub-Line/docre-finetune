@@ -268,6 +268,74 @@ def upload_model_to_hf(
         return False
 
 
+def auto_upload_workflow(model_path: str, base_model_name: str):
+    """Automatic upload workflow using default settings (pre-approved)."""
+    # Check if model exists
+    if not Path(model_path).exists():
+        logger.error(f"Model path does not exist: {model_path}")
+        return False
+
+    # Load evaluation results
+    eval_results_path = Path(model_path) / "evaluation_results.json"
+    if eval_results_path.exists():
+        with open(eval_results_path, 'r') as f:
+            eval_results = json.load(f)
+    else:
+        logger.warning("No evaluation results found. Using default values.")
+        eval_results = {
+            'accuracy': 0.0,
+            'macro_avg_f1': 0.0,
+            'weighted_avg_f1': 0.0,
+            'num_test_examples': 0
+        }
+
+    # Display results but use default config
+    print("\n" + "="*80)
+    print("MODEL EVALUATION RESULTS (AUTO-UPLOAD)")
+    print("="*80)
+    print(f"Accuracy: {eval_results.get('accuracy', 0):.4f}")
+    print(f"Macro F1: {eval_results.get('macro_avg_f1', 0):.4f}")
+    print(f"Weighted F1: {eval_results.get('weighted_avg_f1', 0):.4f}")
+    print(f"Number of test examples: {eval_results.get('num_test_examples', 0)}")
+    print("="*80)
+
+    # Use default HF configuration (pre-approved)
+    # Clean model name for repo naming
+    clean_model_name = base_model_name.replace("/", "-").replace("_", "-").lower()
+    default_repo_name = f"re-docred-{clean_model_name}-finetuned"
+
+    # Get HF token from environment
+    hf_token = os.getenv('HF_TOKEN')
+    if not hf_token:
+        logger.error("HF_TOKEN environment variable required for auto-upload")
+        print("❌ Auto-upload failed: HF_TOKEN environment variable not set")
+        print("💡 Set HF_TOKEN or use 'ask_later' mode for interactive upload")
+        return False
+
+    hf_config = HuggingFaceConfig(
+        repo_name=default_repo_name,
+        organization=None,  # Upload to personal account
+        private=False,      # Public by default
+        token=hf_token
+    )
+
+    print(f"🚀 Auto-uploading to: {hf_config.repo_name}")
+    print(f"📂 Repository will be: Public")
+    print(f"🏢 Organization: Personal account")
+
+    # Upload model
+    success = upload_model_to_hf(model_path, eval_results, hf_config, base_model_name)
+
+    if success:
+        print(f"\n✅ Model automatically uploaded!")
+        print(f"🔗 Model URL: https://huggingface.co/{hf_config.repo_name}")
+        print(f"📚 You can now use this model with: transformers.AutoModel.from_pretrained('{hf_config.repo_name}')")
+    else:
+        print("\n❌ Auto-upload failed. Please check the logs for details.")
+
+    return success
+
+
 def main_upload_workflow(model_path: str, base_model_name: str):
     """Main workflow for uploading model to HF Hub."""
     # Check if model exists

@@ -90,6 +90,33 @@ def setup_hf_authentication():
             print("Please enter 1 or 2.")
 
 
+def get_upload_approval():
+    """Get user pre-approval for HuggingFace upload after training."""
+    print("\n📤 HuggingFace Upload Settings")
+    print("=" * 50)
+    print("Training may take several hours. You can pre-approve model upload")
+    print("to HuggingFace Hub so you don't need to monitor the process.")
+    print("\nOptions:")
+    print("1. Yes - Automatically upload BEST model after successful training")
+    print("2. No - Ask me later (requires monitoring)")
+    print("3. Skip - Never upload")
+
+    while True:
+        choice = input("\nPre-approve HuggingFace upload? (1/2/3): ").strip()
+
+        if choice == "1":
+            print("✅ Pre-approved: Will upload BEST model automatically after training")
+            return "auto_upload"
+        elif choice == "2":
+            print("⏰ Will ask for approval after training completes")
+            return "ask_later"
+        elif choice == "3":
+            print("🚫 Upload disabled - model will only be saved locally")
+            return "skip_upload"
+        else:
+            print("Please enter 1, 2, or 3.")
+
+
 def setup_directories():
     """Create necessary directories and ensure they exist."""
     dirs = ["./data", "./outputs", "./logs", "./backups"]
@@ -119,6 +146,9 @@ def main():
         print(f"Using specified model: {model_name}")
     else:
         model_name = get_user_model_choice()
+
+    # Get upload approval before starting training
+    upload_approval = get_upload_approval()
 
     # Initialize configs
     model_config = ModelConfig(model_name=model_name)
@@ -203,13 +233,20 @@ def main():
             print("    Test data not found, skipping evaluation...")
             eval_results = None
 
-        # Step 4: HF upload (made optional)
-        print("\n4. HuggingFace upload (optional)...")
-        if eval_results:
+        # Step 4: HF upload (based on pre-approval)
+        print("\n4. HuggingFace upload...")
+        if upload_approval == "skip_upload":
+            print("    🚫 Upload skipped by user preference")
+        elif not eval_results:
+            print("    ⚠️  Skipping upload due to missing eval results")
+        elif upload_approval == "auto_upload":
+            print("    🚀 Auto-uploading BEST model (pre-approved)...")
+            from upload_to_hf import auto_upload_workflow
+            auto_upload_workflow(training_config.output_dir, model_config.model_name)
+        elif upload_approval == "ask_later":
+            print("    ❓ Asking for upload approval...")
             from upload_to_hf import main_upload_workflow
             main_upload_workflow(training_config.output_dir, model_config.model_name)
-        else:
-            print("    Skipping upload due to missing eval results")
 
         print("\nPIPELINE COMPLETED SUCCESSFULLY!")
 
