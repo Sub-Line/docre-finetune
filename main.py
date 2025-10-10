@@ -160,7 +160,7 @@ def main():
     if 'mistral' in model_name.lower() or '7b' in model_name.lower():
         print("🚀 Detected large model - using QLoRA for efficiency!")
         training_config.batch_size = 4   # QLoRA allows larger batches
-        training_config.eval_steps = 1000  # More reasonable evaluation frequency
+        training_config.eval_steps = 500  # More reasonable evaluation frequency
         training_config.save_steps = 1000  # More reasonable saving
         training_config.logging_steps = 50   # Frequent logging to track progress
         data_config.max_examples = 20000  # Can handle more data with QLoRA

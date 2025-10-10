@@ -443,7 +443,7 @@ def train_model(
         load_best_model_at_end=True,
         metric_for_best_model="f1",
         greater_is_better=True,
-        report_to=None,  # Disable wandb by default
+        report_to="wandb",  # Enable wandb logging
         learning_rate=training_config.learning_rate,
         save_total_limit=1,  # Keep only 1 checkpoint (saves space!)
         dataloader_num_workers=0,  # Disable multiprocessing for memory
