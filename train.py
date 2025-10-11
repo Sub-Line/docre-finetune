@@ -339,28 +339,18 @@ def train_model(
     if use_qlora:
         logger.info("🚀 Using QLoRA for extreme memory efficiency!")
 
-        # Ultra-aggressive 4-bit quantization config for Mistral
+        # Stable 4-bit quantization config for Mistral
         bnb_config = BitsAndBytesConfig(
             load_in_4bit=True,
             bnb_4bit_use_double_quant=True,
             bnb_4bit_quant_type="nf4",
             bnb_4bit_compute_dtype=torch.bfloat16,
-            llm_int8_enable_fp32_cpu_offload=True,  # CPU offload for extreme memory savings
+            # Remove CPU offload to prevent device mapping conflicts
         )
 
-        # Ultra-aggressive device mapping for Mistral
-        if 'mistral' in model_config.model_name.lower():
-            device_map = {
-                "model.embed_tokens": "cpu",
-                "model.layers.0": "cpu",
-                "model.layers.1": "cpu",
-                "model.layers.2": "cpu",
-                "lm_head": "cpu",
-                "model.norm": "cpu",
-            }
-            logger.info("🔄 Using CPU offload for embeddings and some layers")
-        else:
-            device_map = 'auto'
+        # Safe device mapping - let transformers handle it automatically
+        device_map = 'auto'  # Much safer than manual mapping
+        logger.info("🔄 Using automatic device mapping for optimal memory usage")
 
         model_kwargs = {
             'num_labels': num_labels,
@@ -380,10 +370,28 @@ def train_model(
             'device_map': 'auto',
         }
 
-    model = AutoModelForSequenceClassification.from_pretrained(
-        model_config.model_name,
-        **model_kwargs
-    )
+    # Load model with error handling
+    try:
+        logger.info(f"🔄 Loading model with settings: {model_kwargs}")
+        model = AutoModelForSequenceClassification.from_pretrained(
+            model_config.model_name,
+            **model_kwargs
+        )
+        logger.info("✅ Model loaded successfully")
+    except Exception as e:
+        logger.error(f"❌ Model loading failed: {e}")
+        if 'device' in str(e).lower():
+            logger.info("🔄 Retrying with simpler device mapping...")
+            # Fallback to simpler settings
+            model_kwargs['device_map'] = None
+            model_kwargs.pop('low_cpu_mem_usage', None)
+            model = AutoModelForSequenceClassification.from_pretrained(
+                model_config.model_name,
+                **model_kwargs
+            )
+            logger.info("✅ Model loaded with fallback settings")
+        else:
+            raise e
 
     # Setup LoRA for large models
     if use_qlora:
