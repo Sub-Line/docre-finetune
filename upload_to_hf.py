@@ -221,25 +221,52 @@ def upload_model_to_hf(
 ) -> bool:
     """Upload model to HuggingFace Hub."""
     try:
-        # Initialize HF API
+        # Initialize HF API and validate token
         api = HfApi(token=hf_config.token)
+
+        # Validate token works
+        try:
+            user_info = api.whoami()
+            logger.info(f"✅ Token validated for user: {user_info['name']}")
+        except Exception as e:
+            logger.error(f"❌ Token validation failed: {e}")
+            logger.error("Please check your HuggingFace token permissions")
+            return False
 
         # Create repository name
         repo_id = f"{hf_config.organization}/{hf_config.repo_name}" if hf_config.organization else hf_config.repo_name
 
         logger.info(f"Creating repository: {repo_id}")
 
-        # Create repository
+        # Create repository with better error handling
         try:
+            logger.info(f"Attempting to create repository: {repo_id}")
+            logger.info(f"Repository settings - Private: {hf_config.private}, Token available: {bool(hf_config.token)}")
+
             create_repo(
                 repo_id=repo_id,
                 token=hf_config.token,
                 private=hf_config.private,
-                exist_ok=True
+                exist_ok=True,
+                repo_type="model"  # Explicitly specify model type
             )
-            logger.info(f"Repository created/exists: {repo_id}")
-        except HfHubHTTPError as e:
-            if "already exists" in str(e):
+            logger.info(f"✅ Repository created/verified: {repo_id}")
+
+            # Verify repository exists by checking with API
+            try:
+                api.repo_info(repo_id=repo_id, token=hf_config.token)
+                logger.info(f"✅ Repository confirmed accessible: {repo_id}")
+            except Exception as e:
+                logger.warning(f"⚠️ Repository verification failed: {e}")
+
+        except Exception as e:
+            logger.error(f"❌ Repository creation failed: {e}")
+            logger.error(f"Error type: {type(e).__name__}")
+            if "401" in str(e) or "authentication" in str(e).lower():
+                logger.error("Authentication error - check your HF token permissions")
+            elif "403" in str(e) or "forbidden" in str(e).lower():
+                logger.error("Permission error - token may not have write access")
+            elif "already exists" in str(e).lower():
                 logger.info(f"Repository already exists: {repo_id}")
             else:
                 raise e
@@ -251,14 +278,41 @@ def upload_model_to_hf(
         with open(readme_path, 'w') as f:
             f.write(model_card_content)
 
-        # Upload model files
+        # Upload model files with retry mechanism
         logger.info(f"Uploading model files from {model_path}...")
-        upload_folder(
-            folder_path=model_path,
-            repo_id=repo_id,
-            token=hf_config.token,
-            ignore_patterns=["*.log", "__pycache__", "*.pyc", "checkpoint-*"]
-        )
+        try:
+            upload_folder(
+                folder_path=model_path,
+                repo_id=repo_id,
+                token=hf_config.token,
+                ignore_patterns=["*.log", "__pycache__", "*.pyc", "checkpoint-*"],
+                commit_message="Upload RE-DocRED fine-tuned model",
+                commit_description="Fine-tuned model for relation extraction on RE-DocRED dataset"
+            )
+            logger.info(f"✅ Model files uploaded successfully to {repo_id}")
+        except Exception as e:
+            logger.error(f"❌ Upload failed: {e}")
+            if "Repository not found" in str(e):
+                logger.error("Repository not found - trying to create it again...")
+                # Retry repository creation
+                create_repo(
+                    repo_id=repo_id,
+                    token=hf_config.token,
+                    private=hf_config.private,
+                    exist_ok=True,
+                    repo_type="model"
+                )
+                logger.info("Repository created, retrying upload...")
+                upload_folder(
+                    folder_path=model_path,
+                    repo_id=repo_id,
+                    token=hf_config.token,
+                    ignore_patterns=["*.log", "__pycache__", "*.pyc", "checkpoint-*"],
+                    commit_message="Upload RE-DocRED fine-tuned model"
+                )
+                logger.info(f"✅ Model files uploaded successfully on retry to {repo_id}")
+            else:
+                raise e
 
         logger.info(f"Model successfully uploaded to: https://huggingface.co/{repo_id}")
         return True
