@@ -172,7 +172,7 @@ def main():
         training_config.eval_steps = 500  # More reasonable evaluation frequency
         training_config.save_steps = 2000  # Less frequent saving to reduce I/O
         training_config.logging_steps = 25   # Frequent logging to track progress
-        data_config.max_examples = 15000  # Reduced dataset size for stability
+        data_config.max_examples = 20000  # Restore dataset size for better performance
         print(f"   🎯 AGGRESSIVE QLoRA Optimizations:")
         print(f"   - 4-bit quantization: ~75% memory reduction")
         print(f"   - LoRA adapters: Only train ~0.5% of parameters")
