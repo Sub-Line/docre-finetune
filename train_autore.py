@@ -474,7 +474,7 @@ def train_autore_model(
         logging_steps=50,
         eval_steps=500,
         save_steps=1000,
-        evaluation_strategy="steps",
+        eval_strategy="steps",
         save_strategy="steps",
         load_best_model_at_end=True,
         metric_for_best_model="eval_loss",  # Use loss for LM
