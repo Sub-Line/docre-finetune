@@ -222,24 +222,26 @@ def main():
             else:
                 print(f"  ⚠ {input_file} not found, skipping...")
 
-        # Step 2: Training
-        print("\n2. Starting model training...")
-        from train import train_model
+        # Step 2: AutoRE Training
+        print("\n2. Starting AutoRE RHF model training...")
+        from train_autore import train_autore_model
 
-        trainer, train_results = train_model(model_config, training_config, data_config)
+        trainer, train_results = train_autore_model(model_config, training_config, data_config)
         print(f"  ✓ Training completed! Final results: {train_results}")
 
-        # Step 3: Evaluation
-        print("\n3. Evaluating model...")
-        from evaluate import evaluate_model
+        # Step 3: AutoRE Evaluation
+        print("\n3. Evaluating AutoRE model...")
+        from evaluate_autore import evaluate_autore_model
 
         test_data_path = Path(data_config.data_dir) / "test_processed.json"
         if test_data_path.exists():
-            eval_results = evaluate_model(training_config.output_dir, str(test_data_path), data_config)
-            print(f"    Evaluation completed!")
-            print(f"    Accuracy: {eval_results['accuracy']:.4f}")
-            print(f"    Macro F1: {eval_results['macro_avg_f1']:.4f}")
-            print(f"    Weighted F1: {eval_results['weighted_avg_f1']:.4f}")
+            eval_results = evaluate_autore_model(training_config.output_dir, str(test_data_path), data_config)
+            print(f"    AutoRE Evaluation completed!")
+            print(f"    Overall Accuracy: {eval_results['overall_accuracy']:.4f}")
+            print(f"    Relation Extraction: {eval_results['relation_accuracy']:.4f}")
+            print(f"    Head Identification: {eval_results['head_accuracy']:.4f}")
+            print(f"    Fact Extraction (Exact): {eval_results['fact_exact_accuracy']:.4f}")
+            print(f"    Fact Extraction (Partial): {eval_results['fact_partial_accuracy']:.4f}")
         else:
             print("    Test data not found, skipping evaluation...")
             eval_results = None
