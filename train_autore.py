@@ -359,8 +359,8 @@ def save_autore_model(trainer, tokenizer, training_config, eval_results, use_qlo
 {'💾 Google Drive: ' + drive_path if drive_success else '❌ Google Drive: Failed'}
 
 📊 Results:
-- Perplexity: {eval_results.get('eval_perplexity', 'N/A'):.4f}
-- Loss: {eval_results.get('eval_loss', 'N/A'):.4f}
+- Perplexity: {eval_results.get('eval_perplexity', 'N/A')}
+- Loss: {eval_results.get('eval_loss', 'N/A')}
 
 🏷️ Model Info:
 - Supported relations: 96
