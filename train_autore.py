@@ -536,9 +536,6 @@ def train_autore_model(
         eval_accumulation_steps=1,  # Process eval in smaller chunks
         prediction_loss_only=True,  # Don't store predictions, only compute loss
         dataloader_pin_memory=False,  # Reduce memory pressure
-        skip_memory_metrics=True,  # Skip memory-intensive metrics
-        max_eval_samples=1500,  # Limit evaluation samples (500 examples * 3 = 1500 instructions)
-        eval_delay=1000,  # Delay first evaluation to save memory during early training
     )
 
     logger.info(f"Using batch size: {training_args.per_device_train_batch_size}")
