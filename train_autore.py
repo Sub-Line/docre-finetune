@@ -277,22 +277,29 @@ def save_autore_model(trainer, tokenizer, training_config, eval_results, use_qlo
     logger.info(f"Saving AutoRE model to {training_config.output_dir}")
 
     if use_qlora:
-        # For QLoRA, save only the adapter weights
+        # For QLoRA, save only the adapter weights with proper PEFT config
         logger.info("💾 Saving AutoRE QLoRA adapter...")
         trainer.model.save_pretrained(training_config.output_dir)
 
-        # Save proper adapter config for AutoRE
-        adapter_config = {
-            "base_model_name_or_path": trainer.model.peft_config['default'].base_model_name_or_path,
-            "model_type": "autore_qlora_adapter",
-            "training_paradigm": "RHF",
-            "task_type": "CAUSAL_LM"
-        }
+        # The save_pretrained should handle the PEFT config correctly
+        # But let's ensure the adapter_config.json has required PEFT fields
+        peft_config_path = Path(training_config.output_dir) / "adapter_config.json"
+        if peft_config_path.exists():
+            # Load existing config and ensure it has required fields
+            with open(peft_config_path, 'r') as f:
+                config = json.load(f)
 
-        with open(Path(training_config.output_dir) / "adapter_config.json", 'w') as f:
-            json.dump(adapter_config, f, indent=2)
+            # Ensure required PEFT fields are present
+            if 'peft_type' not in config:
+                config['peft_type'] = 'LORA'
+            if 'task_type' not in config:
+                config['task_type'] = 'CAUSAL_LM'
 
-        logger.info("✅ AutoRE QLoRA adapter saved!")
+            # Save updated config
+            with open(peft_config_path, 'w') as f:
+                json.dump(config, f, indent=2)
+
+        logger.info("✅ AutoRE QLoRA adapter saved with proper PEFT config!")
     else:
         # Standard model saving
         trainer.save_model(training_config.output_dir)

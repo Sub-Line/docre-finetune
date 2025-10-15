@@ -14,6 +14,15 @@ def load_autore_model(model_path: str):
     try:
         # Try loading as PEFT model first
         try:
+            # First check if PEFT config file exists and is valid
+            adapter_config_path = f"{model_path}/adapter_config.json"
+            try:
+                with open(adapter_config_path, 'r') as f:
+                    config_data = json.load(f)
+                print(f"📄 Found adapter config: {config_data}")
+            except FileNotFoundError:
+                print("📄 No adapter_config.json found")
+
             peft_config = PeftConfig.from_pretrained(model_path)
             print("📦 Detected QLoRA adapter")
 

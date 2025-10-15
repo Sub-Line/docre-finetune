@@ -26,6 +26,13 @@ def load_autore_model(model_path: str) -> Tuple[Any, Any]:
     try:
         # Check if it's a PEFT model
         try:
+            # First check if PEFT config file exists and is valid
+            adapter_config_path = Path(model_path) / "adapter_config.json"
+            if adapter_config_path.exists():
+                with open(adapter_config_path, 'r') as f:
+                    config_data = json.load(f)
+                logger.info(f"📄 Found adapter config: {config_data}")
+
             peft_config = PeftConfig.from_pretrained(model_path)
             logger.info("📦 Detected PEFT/LoRA model")
 
@@ -40,8 +47,9 @@ def load_autore_model(model_path: str) -> Tuple[Any, Any]:
             model = PeftModel.from_pretrained(base_model, model_path)
             logger.info("✅ PEFT model loaded successfully")
 
-        except:
+        except Exception as e:
             # Regular model
+            logger.warning(f"PEFT loading failed: {e}")
             logger.info("📦 Loading as regular CausalLM model")
             model = AutoModelForCausalLM.from_pretrained(
                 model_path,
